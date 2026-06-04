@@ -1,0 +1,35 @@
+# Env / secrets
+.env
+.env.local
+*.env
+
+# Uploaded media + generated data (mounted volume)
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Coverage
+.coverage
+htmlcov/
+coverage/
