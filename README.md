@@ -58,8 +58,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the full diagram. In shor
 - The worker transcribes (**Deepgram**, diarized) or parses the transcript,
   chunks it, embeds chunks (**OpenAI**), and stores vectors in **Postgres +
   pgvector**, then extracts a summary/decisions/action items (**Groq**).
-- Chat retrieves the most relevant chunks for a question and asks **Groq** to
-  answer **only** from that context, returning cited timestamps/speakers.
+- Chat runs **parallel hybrid retrieval** (FTS + semantic, both overlapping with
+  the OpenAI embed call), asks **Groq** to answer **only** from that context,
+  and reveals the answer in the frontend with a smooth word-by-word animation
+  (rather than raw SSE streaming), returning cited timestamps/speakers.
 
 Services: `db` (pgvector), `redis`, `backend`, `worker`, `frontend`.
 
@@ -181,6 +183,12 @@ endpoints. Production extension: OpenTelemetry + LangSmith/Langfuse.
   tsvector column keeps keyword search in sync with no app-side maintenance;
   RRF fusion avoids manual weight tuning while improving recall on exact terms
   (speaker names, dates, acronyms) that embeddings routinely miss.
+- **Parallel retrieval.** FTS and the OpenAI embed call are dispatched
+  concurrently so DB round-trips are off the chat latency critical path.
+- **Smooth answer reveal instead of token-by-token streaming.** The frontend
+  calls the non-streaming `/chat` endpoint and reveals the full answer
+  word-by-word at a fixed pace. This removes SSE complexity and produces a
+  consistent reading rhythm rather than the bursty feel of raw token streaming.
 
 ---
 
@@ -203,6 +211,7 @@ endpoints. Production extension: OpenTelemetry + LangSmith/Langfuse.
   re-processing) — see *Limitations*.
 - No end-to-end (Playwright) tests; no CI pipeline wired up.
 - Single Groq model for all queries (no routing); no embedding cache.
+- Fake streaming reveal (word-by-word) rather than real SSE token streaming — acceptable UX trade-off at this scale.
 
 ---
 
