@@ -65,7 +65,7 @@ export default function DashboardPage() {
           {loading ? (
             <div className="card p-10 text-center text-sm text-slate-500">Loading…</div>
           ) : (
-            <RecordingsTable recordings={recordings} />
+            <RecordingsTable recordings={recordings} onDeleted={refresh} />
           )}
         </div>
       </main>

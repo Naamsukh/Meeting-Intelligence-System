@@ -28,6 +28,17 @@ function FileIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
 export default function RecordingPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -36,6 +47,8 @@ export default function RecordingPage() {
   const [tab, setTab] = useState<"chat" | "transcript">("chat");
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
 
   const seekTo = useCallback((seconds: number) => {
@@ -45,6 +58,18 @@ export default function RecordingPage() {
   const refreshRecording = useCallback(() => {
     api.getRecording(id).then(setRecording).catch(() => {});
   }, [id]);
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      await api.deleteRecording(id);
+      router.replace("/");
+    } catch {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -106,6 +131,32 @@ export default function RecordingPage() {
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <StatusBadge status={recording.status} />
+            {confirmDelete ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? "Deleting…" : "Confirm delete"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleDelete}
+                title="Delete this recording"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:text-slate-400 dark:hover:border-red-800 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+              >
+                <TrashIcon />
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>

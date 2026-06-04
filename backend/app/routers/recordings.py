@@ -138,6 +138,27 @@ def rename_speaker(
     return speaker
 
 
+@router.delete("/{recording_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_recording(
+    recording_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    rec = _get_owned_recording(db, recording_id, user)
+
+    # Remove the uploaded file from disk (ignore if already gone).
+    try:
+        path = absolute_path(rec.file_path)
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+    # Cascade on Recording handles segments, chunks, speakers, messages, etc.
+    db.delete(rec)
+    db.commit()
+
+
 @router.get("/{recording_id}/media")
 def get_media(
     recording_id: uuid.UUID,

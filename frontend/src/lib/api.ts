@@ -109,6 +109,9 @@ export const api = {
     return request<Recording>("/recordings", { method: "POST", body: form });
   },
 
+  deleteRecording: (id: string) =>
+    request<void>(`/recordings/${id}`, { method: "DELETE" }),
+
   getMessages: (id: string) => request<ChatMessage[]>(`/recordings/${id}/messages`),
   chat: (id: string, question: string) =>
     request<{ answer: string; sources: ChatSource[] }>(`/recordings/${id}/chat`, {
