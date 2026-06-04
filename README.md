@@ -48,6 +48,22 @@ cd frontend && npm install && npm test
 
 ---
 
+## Screenshots
+
+| Sign up / Log in | Home — recording list |
+|---|---|
+| ![Sign up / Log in](docs/screenshots/signup-login.png) | ![Home page](docs/screenshots/home-page.png) |
+
+| Recording — transcript view | Recording — chat view |
+|---|---|
+| ![Transcript](docs/screenshots/recording-transcript.png) | ![Chat](docs/screenshots/recording-chat.png) |
+
+**Transcript sample**
+
+![Transcript sample](docs/screenshots/transcript-sample.png)
+
+---
+
 ## b. Architecture overview
 
 See [`docs/architecture.md`](docs/architecture.md) for the full diagram. In short:
