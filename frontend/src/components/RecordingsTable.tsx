@@ -15,7 +15,7 @@ export default function RecordingsTable({ recordings }: { recordings: Recording[
 
   if (recordings.length === 0) {
     return (
-      <div className="card p-10 text-center text-sm text-slate-500">
+      <div className="card p-10 text-center text-sm text-slate-500 dark:text-slate-400">
         No uploads yet. Add a recording or transcript to get started.
       </div>
     );
@@ -24,34 +24,42 @@ export default function RecordingsTable({ recordings }: { recordings: Recording[
   return (
     <div className="card overflow-hidden">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+        <thead className="bg-slate-50 text-left dark:bg-slate-800/50">
           <tr>
-            <th className="px-4 py-3">File</th>
-            <th className="px-4 py-3">Type</th>
-            <th className="px-4 py-3">Size</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Uploaded</th>
+            {["File", "Type", "Size", "Status", "Uploaded"].map((h) => (
+              <th key={h} className="section-label px-4 py-3">
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {recordings.map((r) => {
             const clickable = r.status === "completed";
             return (
               <tr
                 key={r.id}
                 onClick={() => clickable && router.push(`/recordings/${r.id}`)}
-                className={
-                  clickable ? "cursor-pointer hover:bg-slate-50" : "opacity-80"
-                }
+                className={`transition-colors ${
+                  clickable
+                    ? "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    : "opacity-70"
+                }`}
                 title={r.status === "failed" ? r.error || "Processing failed" : undefined}
               >
-                <td className="px-4 py-3 font-medium">{r.original_filename}</td>
-                <td className="px-4 py-3 capitalize text-slate-500">{r.media_type}</td>
-                <td className="px-4 py-3 text-slate-500">{formatBytes(r.size_bytes)}</td>
+                <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+                  {r.original_filename}
+                </td>
+                <td className="px-4 py-3 capitalize text-slate-500 dark:text-slate-400">
+                  {r.media_type}
+                </td>
+                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                  {formatBytes(r.size_bytes)}
+                </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={r.status} />
                 </td>
-                <td className="px-4 py-3 text-slate-500">
+                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                   {new Date(r.created_at).toLocaleString()}
                 </td>
               </tr>
