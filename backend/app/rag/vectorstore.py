@@ -1,18 +1,26 @@
 """Hybrid search (semantic + full-text) over transcript_chunks.
 
 Semantic results come from pgvector cosine distance; full-text results from
-PostgreSQL tsvector/tsquery.  Both candidate pools are fetched independently,
-then merged with Reciprocal Rank Fusion (RRF) so chunks that rank highly in
-either signal rise to the top without needing hand-tuned weights.
+PostgreSQL tsvector/tsquery.  Both candidate pools are fetched independently
+and in parallel, then merged with Reciprocal Rank Fusion (RRF) so chunks that
+rank highly in either signal rise to the top without needing hand-tuned weights.
+
+Parallelism:
+  - FTS query is submitted to a thread the moment the query string is available
+    (no embedding needed), overlapping with the OpenAI embed call.
+  - Semantic query runs as soon as the embedding is ready, also in a thread,
+    so both DB round-trips overlap.
 """
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session  # still used by index_chunks
 
 from app.config import settings
+from app.database import SessionLocal
 from app.models import TranscriptChunk
 from app.rag.chunking import Chunk
 from app.rag.embeddings import embed_query, embed_texts
@@ -58,8 +66,39 @@ def index_chunks(db: Session, recording_id: uuid.UUID, chunks: list[Chunk]) -> i
     return len(chunks)
 
 
+def _semantic_query(
+    recording_id: uuid.UUID, query_vector: list[float], fetch_k: int
+) -> list[tuple]:
+    with SessionLocal() as db:
+        distance = TranscriptChunk.embedding.cosine_distance(query_vector).label("distance")
+        return (
+            db.query(TranscriptChunk, distance)
+            .filter(TranscriptChunk.recording_id == recording_id)
+            .order_by(distance.asc())
+            .limit(fetch_k)
+            .all()
+        )
+
+
+def _fts_query(
+    recording_id: uuid.UUID, query: str, fetch_k: int
+) -> list[tuple]:
+    with SessionLocal() as db:
+        tsquery = func.plainto_tsquery("english", query)
+        ts_rank_col = func.ts_rank(TranscriptChunk.ts_content, tsquery).label("ts_rank")
+        return (
+            db.query(TranscriptChunk, ts_rank_col)
+            .filter(
+                TranscriptChunk.recording_id == recording_id,
+                TranscriptChunk.ts_content.op("@@")(tsquery),
+            )
+            .order_by(ts_rank_col.desc())
+            .limit(fetch_k)
+            .all()
+        )
+
+
 def retrieve(
-    db: Session,
     recording_id: uuid.UUID,
     query: str,
     top_k: int,
@@ -67,25 +106,30 @@ def retrieve(
 ) -> list[RetrievedChunk]:
     """Hybrid retrieval: fuse semantic and full-text rankings with RRF.
 
-    Both passes fetch `fetch_k` candidates independently.  RRF then re-ranks
-    the union; we return the top `top_k` results.  `score_threshold` is applied
-    to the cosine-similarity score so clearly irrelevant semantic-only matches
-    are still filtered, but keyword matches are always kept.
+    FTS starts in a background thread immediately (no embedding needed), so it
+    overlaps with the OpenAI embed call.  Semantic starts as soon as the vector
+    is ready, also in a thread.  Both DB round-trips run in parallel.
     """
     fetch_k = settings.retrieval_fetch_k
 
-    query_vector = embed_query(query)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        # FTS needs no embedding — start it right away.
+        fts_future = (
+            pool.submit(_fts_query, recording_id, query, fetch_k)
+            if query.strip()
+            else None
+        )
 
-    # ── Semantic pass ──────────────────────────────────────────────────────────
-    distance = TranscriptChunk.embedding.cosine_distance(query_vector).label("distance")
-    semantic_rows = (
-        db.query(TranscriptChunk, distance)
-        .filter(TranscriptChunk.recording_id == recording_id)
-        .order_by(distance.asc())
-        .limit(fetch_k)
-        .all()
-    )
+        # Embedding blocks the current thread; FTS runs concurrently.
+        query_vector = embed_query(query)
 
+        # Semantic can start now that we have the vector.
+        semantic_future = pool.submit(_semantic_query, recording_id, query_vector, fetch_k)
+
+        semantic_rows = semantic_future.result()
+        fts_rows = fts_future.result() if fts_future else []
+
+    # ── Build lookup structures from semantic results ──────────────────────────
     semantic_ranks: dict[int, int] = {
         chunk.id: rank for rank, (chunk, _) in enumerate(semantic_rows, 1)
     }
@@ -96,24 +140,12 @@ def retrieve(
         chunk.id: chunk for chunk, _ in semantic_rows
     }
 
-    # ── Full-text pass ─────────────────────────────────────────────────────────
-    fts_ranks: dict[int, int] = {}
-    if query.strip():
-        tsquery = func.plainto_tsquery("english", query)
-        ts_rank_col = func.ts_rank(TranscriptChunk.ts_content, tsquery).label("ts_rank")
-        fts_rows = (
-            db.query(TranscriptChunk, ts_rank_col)
-            .filter(
-                TranscriptChunk.recording_id == recording_id,
-                TranscriptChunk.ts_content.op("@@")(tsquery),
-            )
-            .order_by(ts_rank_col.desc())
-            .limit(fetch_k)
-            .all()
-        )
-        fts_ranks = {chunk.id: rank for rank, (chunk, _) in enumerate(fts_rows, 1)}
-        for chunk, _ in fts_rows:
-            chunks_by_id.setdefault(chunk.id, chunk)
+    # ── Build FTS rank lookup ──────────────────────────────────────────────────
+    fts_ranks: dict[int, int] = {
+        chunk.id: rank for rank, (chunk, _) in enumerate(fts_rows, 1)
+    }
+    for chunk, _ in fts_rows:
+        chunks_by_id.setdefault(chunk.id, chunk)
 
     # ── Reciprocal Rank Fusion ─────────────────────────────────────────────────
     all_ids = set(semantic_ranks) | set(fts_ranks)
@@ -130,11 +162,8 @@ def retrieve(
     results: list[RetrievedChunk] = []
     for cid in ranked_ids[:top_k]:
         chunk = chunks_by_id[cid]
-        # Display the cosine similarity so the existing UI percentage stays meaningful.
-        # For FTS-only chunks (no semantic match), fall back to the RRF score.
         display_score = cosine_scores.get(cid)
         if display_score is None:
-            # Keyword-only hit: include unconditionally, show a neutral score.
             display_score = 0.5
         elif display_score < score_threshold:
             continue

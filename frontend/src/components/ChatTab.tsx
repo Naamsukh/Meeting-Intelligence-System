@@ -96,16 +96,15 @@ export default function ChatTab({
     const startTime = Date.now();
 
     try {
-      let accumulated = "";
-      let finalSources: ChatSource[] = [];
+      const { answer, sources } = await api.chat(recordingId, q);
 
-      for await (const event of api.chatStream(recordingId, q)) {
-        if (event.type === "delta") {
-          accumulated += event.text;
-          setStreamText(accumulated);
-        } else if (event.type === "done") {
-          finalSources = event.sources;
-        }
+      // Reveal the answer word-by-word so it feels like live streaming.
+      const words = answer.split(" ");
+      let revealed = "";
+      for (let i = 0; i < words.length; i++) {
+        revealed += (i === 0 ? "" : " ") + words[i];
+        setStreamText(revealed);
+        await new Promise<void>((r) => setTimeout(r, 40));
       }
 
       setMessages((m) => [
@@ -113,8 +112,8 @@ export default function ChatTab({
         {
           id: Date.now() + 1,
           role: "assistant",
-          content: accumulated,
-          sources: finalSources,
+          content: answer,
+          sources,
           created_at: new Date().toISOString(),
           duration_ms: Date.now() - startTime,
         },

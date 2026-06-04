@@ -59,7 +59,6 @@ def answer_question(
     # 2. Retrieve.
     t_retrieve = time.perf_counter()
     retrieved = retrieve(
-        db,
         recording_id,
         question,
         top_k=settings.retrieval_top_k,
@@ -120,7 +119,6 @@ def stream_answer_question(
         return
 
     retrieved = retrieve(
-        db,
         recording_id,
         question,
         top_k=settings.retrieval_top_k,

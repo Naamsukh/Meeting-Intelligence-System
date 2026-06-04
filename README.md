@@ -97,6 +97,7 @@ low hallucination.
 
 | Choice | Considered | Chosen | Why |
 | --- | --- | --- | --- |
+| Transcription | Deepgram, Whisper | **Deepgram nova-3** | nova-3 has measurably better speaker diarization on mixed meeting audio vs nova-2 (all utterances returned as speaker 0 on real recordings with nova-2); MIME type is explicitly set per file extension so Deepgram demuxes MP4/MOV correctly |
 | Answer LLM | OpenAI, local Llama, Groq | **Groq `llama-3.3-70b-versatile`** | Very low latency for chat UX; strong enough for grounded summarization/Q&A |
 | Embeddings | local `bge-small`, Voyage, OpenAI | **OpenAI `text-embedding-3-small`** (1536-d) | Strong quality-per-cost, no model hosting; isolated behind one module to swap later |
 | Vector DB | Qdrant, Chroma, pgvector | **pgvector** | One datastore; per-recording filter is an indexed WHERE; cascade-delete cleanup |
@@ -120,6 +121,12 @@ Fusion (RRF):
 2. **Full-text pass** — `ts_rank`/`plainto_tsquery` against a `tsvector`
    generated column (`GENERATED ALWAYS AS … STORED`) with a GIN index. Catches
    exact keyword matches (names, acronyms, numbers) that embeddings can miss.
+
+Both passes run in parallel via a `ThreadPoolExecutor`: the FTS query is
+submitted to a background thread immediately (it needs no embedding), while the
+main thread calls the OpenAI embedding API concurrently. As soon as the vector
+is ready the semantic DB query is dispatched to a second thread, so both DB
+round-trips overlap and are off the latency critical path.
 
 RRF merges both ranked lists without hand-tuned weights: chunks that rank
 highly in either signal rise to the top; chunks appearing in both get a double
@@ -285,8 +292,12 @@ test got investigated, not blindly fixed with another prompt.
   from re-ranking; extraction context is truncated to control cost.
 - Status updates use **polling**, not push.
 - Token stored in localStorage (XSS exposure) — fine for the assignment, not prod.
-- Deepgram language/accent quality varies; speaker labels are generic
-  (`Speaker 1…N`), not named.
+- Deepgram diarization works on voice characteristics from a single mixed audio
+  track. It produces distinct `Speaker 1…N` labels when voices are acoustically
+  different; it collapses to one speaker when they are too similar, the clip is
+  very short, or the audio is heavily compressed. Zoom/Teams cloud recordings
+  (one mixed MP4) are supported; per-participant separate tracks are not needed
+  but would improve accuracy.
 - The IVFFlat index is tuned for small data; `lists`/`probes` would be tuned at
   scale.
 
