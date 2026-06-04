@@ -9,6 +9,7 @@ prompt and message primitives; retrieval is plain pgvector for transparency.
 import logging
 import time
 import uuid
+from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.orm import Session
@@ -98,3 +99,59 @@ def answer_question(
         gen_ms=gen_ms,
     )
     return answer.strip(), retrieved
+
+
+def stream_answer_question(
+    db: Session, recording_id: uuid.UUID, question: str
+) -> Generator[dict, None, None]:
+    """Streaming RAG query. Yields SSE-ready dicts:
+      {type: 'delta', text: str}  — one per LLM token
+      {type: 'done', sources: list}  — after the final token
+    """
+    error = guardrails.validate_question(question)
+    if error:
+        yield {"type": "delta", "text": error}
+        yield {"type": "done", "sources": []}
+        return
+    if guardrails.looks_like_injection(question):
+        msg = "I can only answer questions about the content of this meeting."
+        yield {"type": "delta", "text": msg}
+        yield {"type": "done", "sources": []}
+        return
+
+    retrieved = retrieve(
+        db,
+        recording_id,
+        question,
+        top_k=settings.retrieval_top_k,
+        score_threshold=settings.retrieval_score_threshold,
+    )
+
+    if not guardrails.has_sufficient_context(retrieved):
+        yield {"type": "delta", "text": guardrails.NO_CONTEXT_ANSWER}
+        yield {"type": "done", "sources": []}
+        return
+
+    context = _format_context(retrieved)
+    messages = [
+        SystemMessage(content=ANSWER_SYSTEM_PROMPT),
+        HumanMessage(content=ANSWER_USER_TEMPLATE.format(context=context, question=question)),
+    ]
+
+    for chunk in get_chat_model().stream(messages):
+        delta = chunk.content if hasattr(chunk, "content") else str(chunk)
+        if delta:
+            yield {"type": "delta", "text": delta}
+
+    sources = [
+        {
+            "chunk_id": c.id,
+            "chunk_index": c.chunk_index,
+            "start_seconds": c.start_seconds,
+            "end_seconds": c.end_seconds,
+            "speakers": c.speakers,
+            "score": c.score,
+        }
+        for c in retrieved
+    ]
+    yield {"type": "done", "sources": sources}

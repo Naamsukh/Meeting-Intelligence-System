@@ -1,12 +1,14 @@
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import ChatMessage, Recording, User
-from app.rag.pipeline import answer_question
+from app.rag.pipeline import answer_question, stream_answer_question
 from app.schemas import ChatMessageOut, ChatRequest, ChatResponse, ChatSource
 
 router = APIRouter(prefix="/recordings", tags=["chat"])
@@ -66,6 +68,52 @@ def chat(
     db.commit()
 
     return ChatResponse(answer=answer, sources=sources)
+
+
+@router.post("/{recording_id}/chat/stream")
+def stream_chat(
+    recording_id: uuid.UUID,
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    rec = _get_owned_recording(db, recording_id, user)
+    if rec.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Recording is not ready yet (status: {rec.status}).",
+        )
+
+    def event_generator():
+        full_answer: list[str] = []
+        sources_payload: list[dict] = []
+
+        for event in stream_answer_question(db, recording_id, body.question):
+            if event["type"] == "delta":
+                full_answer.append(event["text"])
+                yield f"data: {json.dumps({'type': 'delta', 'text': event['text']})}\n\n"
+            elif event["type"] == "done":
+                sources_payload = event.get("sources", [])
+                yield f"data: {json.dumps({'type': 'done', 'sources': sources_payload})}\n\n"
+
+        answer = "".join(full_answer)
+        db.add(
+            ChatMessage(
+                recording_id=recording_id, user_id=user.id, role="user", content=body.question
+            )
+        )
+        db.add(
+            ChatMessage(
+                recording_id=recording_id,
+                user_id=user.id,
+                role="assistant",
+                content=answer,
+                sources=sources_payload,
+            )
+        )
+        db.commit()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/{recording_id}/messages", response_model=list[ChatMessageOut])

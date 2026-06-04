@@ -17,6 +17,7 @@ export type Recording = {
 };
 
 export type Speaker = {
+  id: number;
   label: string;
   total_speaking_seconds: number;
   segment_count: number;
@@ -56,6 +57,10 @@ export type ChatMessage = {
   sources: ChatSource[] | null;
   created_at: string;
 };
+
+export type StreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; sources: ChatSource[] };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
@@ -109,6 +114,50 @@ export const api = {
     request<{ answer: string; sources: ChatSource[] }>(`/recordings/${id}/chat`, {
       method: "POST",
       body: JSON.stringify({ question }),
+    }),
+
+  async *chatStream(id: string, question: string): AsyncGenerator<StreamEvent> {
+    const token = getToken();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE}/recordings/${id}/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ question }),
+    });
+
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const data = await res.json();
+        detail = data.detail || detail;
+      } catch { /* ignore */ }
+      throw new Error(detail);
+    }
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          yield JSON.parse(line.slice(6)) as StreamEvent;
+        }
+      }
+    }
+  },
+
+  renameSpeaker: (recordingId: string, speakerId: number, name: string) =>
+    request<Speaker>(`/recordings/${recordingId}/speakers/${speakerId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
     }),
 
   mediaUrl: (id: string) =>

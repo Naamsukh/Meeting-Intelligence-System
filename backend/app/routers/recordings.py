@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Recording, TranscriptSegment, User
-from app.schemas import RecordingDetailOut, RecordingOut, SegmentOut
+from app.models import Recording, Speaker, TranscriptChunk, TranscriptSegment, User
+from app.schemas import RecordingDetailOut, RecordingOut, SegmentOut, SpeakerOut, SpeakerRenameRequest
 from app.storage import absolute_path, detect_media_type, is_allowed, save_upload
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
@@ -97,6 +97,45 @@ def get_transcript(
         .order_by(TranscriptSegment.idx.asc())
         .all()
     )
+
+
+@router.patch("/{recording_id}/speakers/{speaker_id}", response_model=SpeakerOut)
+def rename_speaker(
+    recording_id: uuid.UUID,
+    speaker_id: int,
+    body: SpeakerRenameRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Speaker:
+    _get_owned_recording(db, recording_id, user)
+    speaker = db.get(Speaker, speaker_id)
+    if speaker is None or speaker.recording_id != recording_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Speaker not found")
+
+    old_label = speaker.label
+    new_label = body.name.strip()
+    speaker.label = new_label
+
+    db.query(TranscriptSegment).filter(
+        TranscriptSegment.recording_id == recording_id,
+        TranscriptSegment.speaker == old_label,
+    ).update({"speaker": new_label})
+
+    for chunk in (
+        db.query(TranscriptChunk)
+        .filter(
+            TranscriptChunk.recording_id == recording_id,
+            TranscriptChunk.speakers.isnot(None),
+        )
+        .all()
+    ):
+        if chunk.speakers and old_label in chunk.speakers:
+            parts = [p.strip() for p in chunk.speakers.split(",")]
+            chunk.speakers = ", ".join(new_label if p == old_label else p for p in parts)
+
+    db.commit()
+    db.refresh(speaker)
+    return speaker
 
 
 @router.get("/{recording_id}/media")
