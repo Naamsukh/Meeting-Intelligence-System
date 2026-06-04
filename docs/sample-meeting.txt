@@ -1,0 +1,14 @@
+[00:00:02] Alice: Morning everyone, thanks for joining the Q3 planning sync. Let's keep it to thirty minutes.
+[00:00:09] Bob: Sounds good. I think the big item is whether we commit to the mobile launch in August.
+[00:00:17] Carol: From design we're ready, but we still owe final assets for the onboarding flow.
+[00:00:24] Alice: Okay. Decision-wise, are we agreed we're targeting an August 15th launch?
+[00:00:31] Bob: Engineering can hit August 15th if we freeze scope by next Friday.
+[00:00:38] Alice: Great. Let's make that the decision: August 15th launch, scope freeze by Friday the 11th.
+[00:00:46] Carol: I'll deliver the onboarding assets by Wednesday so engineering has buffer.
+[00:00:53] Bob: And I'll write up the scope-freeze checklist and send it to the team today.
+[00:01:01] Alice: Perfect. One open risk: the payments integration is still in review with the vendor.
+[00:01:09] Bob: Right. I'll follow up with the vendor by Monday and report back on the timeline.
+[00:01:16] Carol: Do we need legal sign-off on the new terms before launch?
+[00:01:22] Alice: Yes. I'll loop in legal this week and own getting sign-off before August 1st.
+[00:01:30] Bob: Then I think we're aligned. Scope freeze Friday, assets Wednesday, payments update Monday.
+[00:01:37] Alice: Agreed. Thanks all — let's reconvene next week to confirm the freeze.
