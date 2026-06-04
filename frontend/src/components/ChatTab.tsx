@@ -93,6 +93,8 @@ export default function ChatTab({
     };
     setMessages((m) => [...m, optimistic]);
 
+    const startTime = Date.now();
+
     try {
       let accumulated = "";
       let finalSources: ChatSource[] = [];
@@ -114,6 +116,7 @@ export default function ChatTab({
           content: accumulated,
           sources: finalSources,
           created_at: new Date().toISOString(),
+          duration_ms: Date.now() - startTime,
         },
       ]);
     } catch (err) {
@@ -125,6 +128,7 @@ export default function ChatTab({
           content: err instanceof Error ? `Error: ${err.message}` : "Something went wrong.",
           sources: null,
           created_at: new Date().toISOString(),
+          duration_ms: Date.now() - startTime,
         },
       ]);
     } finally {
@@ -176,6 +180,13 @@ export default function ChatTab({
                   </p>
                   {m.sources && m.sources.length > 0 && (
                     <SourcesList sources={m.sources} seekTo={seekTo} />
+                  )}
+                  {m.duration_ms != null && (
+                    <p className="mt-1.5 text-right text-[10px] text-slate-400 dark:text-slate-500">
+                      {m.duration_ms < 1000
+                        ? `${m.duration_ms}ms`
+                        : `${(m.duration_ms / 1000).toFixed(1)}s`}
+                    </p>
                   )}
                 </div>
               </div>

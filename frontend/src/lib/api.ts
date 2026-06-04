@@ -56,6 +56,7 @@ export type ChatMessage = {
   content: string;
   sources: ChatSource[] | null;
   created_at: string;
+  duration_ms?: number;
 };
 
 export type StreamEvent =

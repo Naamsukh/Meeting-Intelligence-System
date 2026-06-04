@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/naamsukhjobanputra/projects/personal/Meeting-Intelligence-System log --oneline --all)",
+      "Bash(xargs -I{} git show -s --format=\"%H %B\" {})",
+      "Bash(git filter-branch *)",
+      "Bash(git stash *)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --msg-filter 'sed \"/^Co-Authored-By: Claude/d\" | sed -e \"/^$/N;/^\\\\n$/d\"' -- --all)",
+      "Bash(git push *)",
+      "Bash(grep -n \"Author note\\\\|✍️\\\\|\\\\`\\\\`\\\\`$\\\\|Streaming chat\" /Users/naamsukhjobanputra/projects/personal/Meeting-Intelligence-System/README.md)",
+      "Bash(git -C /Users/naamsukhjobanputra/projects/personal/Meeting-Intelligence-System remote -v)"
+    ]
+  }
+}

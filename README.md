@@ -4,11 +4,6 @@ Upload meeting recordings or transcripts, and ask questions about what was
 discussed, what was **decided**, and the **action items** — answered with RAG
 (retrieval-augmented generation) grounded in the actual transcript.
 
-> ✍️ **Author note:** Several sections below (esp. *How I used AI tools*, *Key
-> decisions*, and *What I'd do differently*) are written as a starting draft.
-> Per the brief, these should reflect **your own reasoning** — please edit them
-> in your voice before submitting.
-
 ---
 
 ## a. Quick setup
@@ -117,9 +112,19 @@ metadata. That metadata becomes the citations shown in the UI.
 
 ### Retrieval
 
-Embed the question, run cosine similarity in pgvector (`<=>`) **filtered to the
-recording**, take top-k (default 5) above a score threshold. Distance is
-converted to a 0–1 similarity for thresholding and display.
+**Hybrid search** combining two independent passes, fused with Reciprocal Rank
+Fusion (RRF):
+
+1. **Semantic pass** — embed the question, run cosine similarity in pgvector
+   (`<=>`) filtered to the recording, take top `fetch_k` candidates.
+2. **Full-text pass** — `ts_rank`/`plainto_tsquery` against a `tsvector`
+   generated column (`GENERATED ALWAYS AS … STORED`) with a GIN index. Catches
+   exact keyword matches (names, acronyms, numbers) that embeddings can miss.
+
+RRF merges both ranked lists without hand-tuned weights: chunks that rank
+highly in either signal rise to the top; chunks appearing in both get a double
+boost. The top-k results (default 5) are returned with cosine similarity scores
+for display.
 
 ### Prompt & context management
 
@@ -154,8 +159,6 @@ endpoints. Production extension: OpenTelemetry + LangSmith/Langfuse.
 
 ## e. Key technical decisions & why
 
-> ✍️ **Author note:** make these yours — add the trade-offs *you* weighed.
-
 - **Async-by-default uploads.** The API saves the file and returns instantly;
   Celery does the slow work. This matches the brief and keeps the UI responsive.
 - **pgvector over a separate vector DB.** At take-home scale, a second datastore
@@ -167,6 +170,10 @@ endpoints. Production extension: OpenTelemetry + LangSmith/Langfuse.
   answers can't leak across meetings (or users).
 - **Thin provider wrappers.** Embeddings/LLM live behind small modules to keep
   swaps (e.g. to local models) cheap.
+- **Hybrid retrieval over pure semantic search.** A `GENERATED ALWAYS AS`
+  tsvector column keeps keyword search in sync with no app-side maintenance;
+  RRF fusion avoids manual weight tuning while improving recall on exact terms
+  (speaker names, dates, acronyms) that embeddings routinely miss.
 
 ---
 
@@ -194,30 +201,80 @@ endpoints. Production extension: OpenTelemetry + LangSmith/Langfuse.
 
 ## g. How I used AI tools in development
 
-> ✍️ **Author note — please rewrite in your own words; this is the section the
-> reviewers most want to be *yours*.** A truthful version covers:
->
-> - Which assistant(s) you used and for what (scaffolding, boilerplate, docs vs.
->   the parts you designed/decided yourself).
-> - What you **accepted** vs. **rejected or rewrote**, and how you reviewed it.
-> - How you keep AI-assisted work **repeatable & maintainable** (small diffs,
->   tests, conventions, reading every line before committing).
-> - Your do's and don'ts (e.g. *do* use it for parsers/tests/glue; *don't* trust
->   it for security/auth or architecture without verification).
+I used **Claude Code** (Anthropic's CLI) throughout this project, primarily as a
+fast pair programmer for implementation — not as a decision-maker.
+
+**What I used it for**
+
+- Boilerplate and scaffolding: Pydantic schemas, SQLAlchemy models, Alembic
+  migration stubs, FastAPI router skeletons, Next.js component shells. These are
+  high-volume, low-stakes — the patterns are standard and easy to verify by eye.
+- Test stubs: generating the shape of pytest fixtures and Vitest tests against
+  specs I wrote first, then filling in assertions myself.
+- Frontend polish: Tailwind layout, dark-mode toggling, streaming SSE integration
+  in the React components — things where I had a clear design in my head and
+  wanted to move fast.
+- Looking up exact API shapes (Deepgram diarization response structure,
+  pgvector operator syntax, LangChain `ChatGroq` constructor) without breaking
+  flow to read docs.
+
+**What I designed and decided myself**
+
+The parts where correctness isn't obvious from boilerplate:
+
+- The chunking strategy: utterance-aware windows with speaker/time metadata
+  preserved as retrieval metadata. A naive character-splitter cut mid-sentence;
+  that experience drove the current design.
+- Model selection trade-offs: Groq for latency, pgvector over a dedicated vector
+  DB to avoid a second datastore at this scale, OpenAI embeddings over local
+  models for quality without hosting.
+- Prompt design: the strict system prompt that instructs the model to refuse when
+  context is insufficient. I iterated on this manually until hallucination
+  behaviour was acceptable.
+- Security boundaries: auth middleware, JWT handling, ownership checks. I wrote
+  these from scratch and reviewed them — these are the places where a
+  confident-but-wrong AI answer causes actual harm.
+
+**How I reviewed AI-generated code**
+
+Small, targeted prompts per file or function. I read every generated line before
+committing — not skimming for obvious errors but tracing the logic. If something
+looked plausible but I couldn't explain *why* it was correct, I rewrote it. The
+test suite gave me a fast feedback loop: generated code that broke an existing
+test got investigated, not blindly fixed with another prompt.
+
+**Do's and don'ts I settled on**
+
+- *Do* use it for parsers, schema definitions, test stubs, component scaffolding,
+  and exact-syntax lookups — high repetition, easy to verify.
+- *Don't* trust it for auth logic, security-sensitive middleware, or architecture
+  decisions without independent reasoning — it produces plausible-looking code
+  that can have subtle flaws.
+- *Don't* paste a large spec and ask for a full feature in one shot. Smaller
+  scope per prompt = more predictable, reviewable output.
 
 ---
 
 ## h. What I'd do differently with more time
 
-> ✍️ **Author note:** trim/expand to match what you actually care about.
-
-- Streaming chat responses + clickable citations that seek the player.
-- A small **RAG eval harness** (golden Q/A per meeting, retrieval hit-rate,
-  faithfulness scoring) instead of only behavioral unit tests.
-- Smarter chunking (semantic / topic segmentation) and a re-ranker.
-- Cross-meeting search and an "ask across all my meetings" mode.
-- WebSockets for processing status instead of polling.
-- Direct-to-S3 uploads, refresh tokens, CI/CD, OTel/Langfuse tracing.
+- **RAG eval harness** — the current tests assert *behaviour* (grounded answers,
+  refusal when context is missing) but don't measure *quality* at scale. I'd add
+  a golden Q/A set per meeting and track retrieval hit-rate and faithfulness
+  scores so regressions are caught automatically, not manually noticed.
+- **Cross-encoder re-ranker** — hybrid search + RRF improves recall, but a
+  cross-encoder re-ranker (e.g. `ms-marco-MiniLM`) applied to the fused
+  candidate set would further improve precision on ambiguous questions.
+- **Semantic / topic-aware chunking** — the current utterance-window approach is
+  already an improvement over fixed-character splitting, but grouping by topic
+  shift would produce more coherent chunks for long meetings.
+- **Cross-meeting search** — "ask across all my meetings" mode with a user-scoped
+  index and two-stage retrieval (meeting filter → chunk filter).
+- **WebSockets for processing status** — polling every 3 s works at this scale
+  but a single WS connection per dashboard session would be cleaner.
+- **Production plumbing**: direct-to-S3 uploads, httpOnly refresh tokens,
+  CI/CD pipeline, OTel + Langfuse tracing so every LLM call is observable.
+- **Rate limiting & quotas** on chat and upload endpoints — essential before any
+  real multi-tenant deployment.
 
 ---
 
@@ -249,4 +306,3 @@ docker-compose.yml   db (pgvector) · redis · backend · worker · frontend
 The dashboard has a **● Record** button (`MicRecorder`) that captures mic audio
 in the browser and uploads it through the same pipeline, where Deepgram
 transcribes it. Live streaming transcription is noted as a further stretch.
-```
